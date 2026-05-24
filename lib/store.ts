@@ -1,6 +1,4 @@
-import { promises as fs } from 'fs'
-import path from 'path'
-import os from 'os'
+import { Redis } from '@upstash/redis'
 import { randomBytes } from 'crypto'
 import type { MatchResponse } from './types'
 
@@ -10,64 +8,51 @@ export interface ShortlistRecord {
   response: MatchResponse
 }
 
-// Writable on every target: local Windows/Mac/Linux dev, and Vercel's /tmp.
-// On Vercel, /tmp survives only for the lifetime of a warm lambda instance
-// — see README "Persistence on Vercel" for upgrade notes to Vercel KV.
-const STORE_PATH = path.join(os.tmpdir(), 'carmatch-shortlists.json')
-const MAX_RECORDS = 500
+// Vercel provisions Upstash Redis with KV_REST_API_* env vars when added via
+// the Storage marketplace. We construct the client explicitly so the same
+// vars also work for `vercel env pull`-ed local development.
+const redis = new Redis({
+  url: process.env.KV_REST_API_URL ?? '',
+  token: process.env.KV_REST_API_TOKEN ?? '',
+})
 
-let chain: Promise<unknown> = Promise.resolve()
-function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = chain.then(fn, fn)
-  chain = next.catch(() => {})
-  return next
-}
-
-async function readAll(): Promise<Record<string, ShortlistRecord>> {
-  try {
-    const raw = await fs.readFile(STORE_PATH, 'utf8')
-    return JSON.parse(raw) as Record<string, ShortlistRecord>
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {}
-    throw e
-  }
-}
-
-async function writeAll(data: Record<string, ShortlistRecord>): Promise<void> {
-  const tmp = `${STORE_PATH}.${randomBytes(4).toString('hex')}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(data), 'utf8')
-  await fs.rename(tmp, STORE_PATH)
-}
+const KEY_PREFIX = 'shortlist:'
+// 90-day TTL. Saved links auto-expire — keeps storage tidy and is plenty
+// for the share-with-family use case.
+const TTL_SECONDS = 60 * 60 * 24 * 90
 
 function newId(): string {
+  // 8 URL-safe characters from 6 random bytes (~2.8e14 possibilities).
   return randomBytes(6).toString('base64url')
 }
 
 export async function saveShortlist(response: MatchResponse): Promise<string> {
-  return withLock(async () => {
-    const all = await readAll()
-    let id = newId()
-    while (all[id]) id = newId()
-
-    all[id] = { id, created_at: new Date().toISOString(), response }
-
-    const entries = Object.entries(all)
-    if (entries.length > MAX_RECORDS) {
-      entries.sort(([, a], [, b]) => b.created_at.localeCompare(a.created_at))
-      await writeAll(Object.fromEntries(entries.slice(0, MAX_RECORDS)))
-    } else {
-      await writeAll(all)
-    }
-    return id
-  })
+  let id = newId()
+  // Collision retry — at ~10^14 entropy this loop effectively never runs more than once.
+  for (let i = 0; i < 5; i++) {
+    const exists = await redis.exists(KEY_PREFIX + id)
+    if (!exists) break
+    id = newId()
+  }
+  const record: ShortlistRecord = {
+    id,
+    created_at: new Date().toISOString(),
+    response,
+  }
+  await redis.set(KEY_PREFIX + id, record, { ex: TTL_SECONDS })
+  return id
 }
 
 export async function getShortlist(id: string): Promise<ShortlistRecord | null> {
-  const all = await readAll()
-  return all[id] ?? null
+  if (!id || typeof id !== 'string' || id.length > 20) return null
+  const record = await redis.get<ShortlistRecord>(KEY_PREFIX + id)
+  return record ?? null
 }
 
 export async function countShortlists(): Promise<number> {
-  const all = await readAll()
-  return Object.keys(all).length
+  try {
+    return await redis.dbsize()
+  } catch {
+    return -1
+  }
 }
