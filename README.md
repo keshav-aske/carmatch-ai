@@ -23,9 +23,10 @@ Then open [http://localhost:3000](http://localhost:3000).
 | Layer | Choice |
 |---|---|
 | Frontend | Next.js 14 (App Router) + React 18 + Tailwind CSS + Lucide icons |
-| Backend | Next.js API route (`POST /api/match`) |
+| Backend | Next.js API routes — matching engine + saved-shortlist store |
 | Data | Local JSON file (`data/cars.json`) — 20 cars, Indian market 2024 |
 | Algorithm | Pure TypeScript scoring engine in `lib/matching.ts` |
+| Persistence | File-based JSON store in `os.tmpdir()` via `lib/store.ts` |
 
 ---
 
@@ -112,6 +113,23 @@ Response:
 
 ### `GET /api/match`
 Returns dataset metadata (size, categories) — useful for sanity checks.
+
+### `POST /api/shortlist`
+Persists a top-3 shortlist returned by `/api/match`. Body: `{ "response": <MatchResponse> }`. Returns `{ "id": "abc12345" }` — a short, URL-safe identifier.
+
+### `GET /api/shortlist/[id]`
+Retrieves a saved shortlist by id. 404 if not found.
+
+### Page: `/s/[id]`
+Server-rendered view of a saved shortlist. Anyone with the link can view the exact same top-3, side-by-side specs, and quiz summary — no login required. Used by the "Save & share" button on the results dashboard.
+
+---
+
+## Persistence
+
+Saved shortlists are written to a JSON file at `os.tmpdir() / carmatch-shortlists.json` via a small write-locked store (`lib/store.ts`). This zero-dependency design works identically on Windows, Mac, Linux, and Vercel.
+
+**On Vercel:** the file lives in the serverless function's `/tmp` directory, which persists for the lifetime of a warm Lambda instance (~minutes to hours of inactivity, then cold-starts). For demo and short-session sharing this is fine; for indefinite persistence swap the two functions in `lib/store.ts` to use [`@vercel/kv`](https://vercel.com/docs/storage/vercel-kv) — provision in the Vercel dashboard, `npm i @vercel/kv`, replace `readAll/writeAll` with `kv.hgetall/hset`. No other code changes required.
 
 ---
 
