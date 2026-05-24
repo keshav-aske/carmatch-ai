@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Recurse -Force -File | Where-Object { $_.FullName -notmatch 'node_modules|\\\\.next|\\\\.git' } | Select-Object FullName | Format-Table -AutoSize)",
+      "PowerShell(\\(Get-Content data\\\\cars.json | Measure-Object -Line\\).Lines; \\(\\(Get-Content data\\\\cars.json -Raw\\) | ConvertFrom-Json\\).Count)",
+      "PowerShell($d = \\(Get-Content data\\\\cars.json -Raw\\) | ConvertFrom-Json; \"Cars: $\\($d.Count\\)\"; $d | Group-Object category | ForEach-Object { \"$\\($_.Name\\): $\\($_.Count\\)\" })",
+      "PowerShell(npm install --no-audit --no-fund 2>&1)",
+      "PowerShell(npm run build 2>&1)",
+      "PowerShell($proc = Start-Process -FilePath \"npm\" -ArgumentList \"run\",\"dev\" -PassThru -WindowStyle Hidden -RedirectStandardOutput \"dev.log\" -RedirectStandardError \"dev.err\"; Start-Sleep -Seconds 8; \"PID: $\\($proc.Id\\)\"; Get-Content dev.log -Tail 10)",
+      "PowerShell($proc = Start-Process -FilePath \"npm.cmd\" -ArgumentList \"run\",\"dev\" -PassThru -WindowStyle Hidden -RedirectStandardOutput \"dev.log\" -RedirectStandardError \"dev.err\"; Start-Sleep -Seconds 10; \"PID: $\\($proc.Id\\)\"; Get-Content dev.log -Tail 15 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'node' } | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item dev.log,dev.err -ErrorAction SilentlyContinue; \"stopped\")"
+    ]
+  }
+}
